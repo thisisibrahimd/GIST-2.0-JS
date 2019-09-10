@@ -7,9 +7,9 @@ const fs = require("fs");
 const client = new Client({
 	user: "postgres",
 	host: "localhost",
-	password: "poland",
-	database: "SynPUF",
-	port: "5463"
+	password: "fleisig",
+	database: "synpuf_5pct",
+	port: "5432"
 });
 
 client.connect(err => {
@@ -25,10 +25,10 @@ let beaut = {
 
 // MAKING QUERY AND INPUT JSON FOR API
 client
-	.query("select * from sam_input;")
+	.query("select * from gist_test.sample_ec;")
 	.then(res => {
 		[beaut.beatiful_query, beaut.beatiful_input] = read_trial(res.rows);
-		console.log(beaut)
+		console.log(JSON.stringify(beaut))
 		// make an https get request to the api
 	})
 	.catch(err => console.error(err.stack))
