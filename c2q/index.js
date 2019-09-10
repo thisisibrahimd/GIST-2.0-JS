@@ -7,9 +7,9 @@ const fs = require("fs");
 const client = new Client({
 	user: "postgres",
 	host: "localhost",
-	password: "fleisig",
-	database: "synpuf_5pct",
-	port: "5432"
+	password: "****",
+	database: "****",
+	port: "****"
 });
 
 client.connect(err => {
