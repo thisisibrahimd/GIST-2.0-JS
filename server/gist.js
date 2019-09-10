@@ -4,20 +4,46 @@ exports.main = main;
 
 // SECTION MAIN PROGRAM
 function main(input, patient_data) {
-	console.log("cleaning");
-	let holy_results = clean_results(input, patient_data);
-	console.log("calculating stats");
+	const holy_results = clean_results(input, patient_data);
 	calculations(input, holy_results);
 
 	console.log("starting hypersurface process");
-	let weights = hyper_surface(input, patient_data);
-	let sum_weights = weights.reduce((prev, curr) => prev + curr, 0);
+	const weights = hyper_surface(input, holy_results);
+	const sum_weights = weights.reduce((prev, curr) => prev + curr, 0);
 
-	let { elig_full, elig_passed } = meetAllCriteria(input, patient_data);
-	let mgist = cal_mgist(sum_weights, elig_passed);
-	let sgist = cal_sgist(input, weights, sum_weights, elig_full);
+	var { elig_full, elig_passed } = meetAllCriteria(input, holy_results);
+	var arrSum = arr => arr.reduce((a,b) => a + b, 0);
+	console.log('Total number of eligible patients: ' + arrSum(elig_passed));
+	var sgist = cal_sgist(input, weights, sum_weights, elig_full);
+	
+	//Rerun meetAllCriteria excluding traits with sGIST 0 to allow for trouble finding patient data without breaking the overall calculation
+	console.log('Current sGIST array: ' + sgist);
+	if (sgist.includes(0)) {
+		const zero_indices = getAllIndices(sgist, 0);
+		for (i=0; i<zero_indices.length; i++) {
+			console.log('This trait has an sGIST of 0, being dropped from analysis: ' + input[zero_indices[i]].criteria_concept_name);
+		}
+		var { elig_full, elig_passed } = meetAllCriteria(input, holy_results, zero_indices);
+		console.log('New number of eligible patients: ' + arrSum(elig_passed));
+		
+		//Now can run mGIST for overall score
+		var mgist = cal_mgist(sum_weights, elig_passed);
+		return [input, holy_results, mgist, sgist];
+	} else {
+		console.log('No 0s, moving on!');
+	}
+	
+	var mgist = cal_mgist(sum_weights, elig_passed);
 
 	return [input, holy_results, mgist, sgist];
+}
+
+function getAllIndices(arr, val) {
+    var indices = [], i;
+    for(i = 0; i < arr.length; i++)
+        if (arr[i] === val)
+        	indices.push(i);
+    return indices;
 }
 
 function clean_results(inp, data) {
@@ -29,9 +55,13 @@ function clean_results(inp, data) {
 				value[value2.column_name] = parseFloat(value[value2.column_name]);
 			} else if (value[value2.column_name] == value.p_id) {
 				value[value2.column_name] = 1;
+			} else if (value[value2.column_name] == 8507 && value2.column_name == 'gender'){
+				value[value2.column_name] = "MALE";
+			} else if (value[value2.column_name] == 8532 && value2.column_name == 'gender'){
+				value[value2.column_name] = "FEMALE";
 			}
 		});
-		return value;
+		return Object.freeze(value);
 	});
 	return holyness;
 }
@@ -53,8 +83,8 @@ function calculations(input, pt_data) {
 				input[ind].mean = -1;
 				input[ind].std = -1;
 				input[ind].tally = -1;
-				input[ind].w_min = -1;
-				input[ind].w_max = -1;
+				input[ind].n_min = -1;
+				input[ind].n_max = -1;
 			} else {
 				input[ind].mean = cal_mean(values);
 				input[ind].std = cal_std(values);
@@ -63,9 +93,9 @@ function calculations(input, pt_data) {
 					input[ind].criteria_max,
 					values
 				);
-				input[ind].w_min =
+				input[ind].n_min =
 					(input[ind].criteria_min - input[ind].mean) / input[ind].std;
-				input[ind].w_max =
+				input[ind].n_max =
 					(input[ind].criteria_max - input[ind].mean) / input[ind].std;
 			}
 		}
@@ -99,9 +129,6 @@ function cal_elig_prec(min, max, values) {
 	return percentage;
 }
 
-
-
-
 function hyper_surface(input, patient_values) {
 	let features = [];
 	let labels = [];
@@ -114,7 +141,7 @@ function hyper_surface(input, patient_values) {
 			if (trait.column_name[0] == "m") {
 				if (data[trait.column_name] == -1) {
 					data[trait.column_name] =
-						(trait.criteria_max - trait.criteria_min) / 2 + trait.criteria_min;
+						((trait.criteria_max - trait.criteria_min) / 2) + trait.criteria_min;
 				}
 				w_feat = cal_weights(
 					data[trait.column_name],
@@ -148,7 +175,6 @@ function hyper_surface(input, patient_values) {
 	});
 	console.log("training");
 	svm.train(features, labels);
-	console.log("hyper surfacing");
 	const labels_pred = svm.predict(features);
 	let weights = labels_pred.map(
 		(pred, i) => 1 / (1 + Math.abs(pred - labels[i]))
@@ -156,38 +182,40 @@ function hyper_surface(input, patient_values) {
 	return weights;
 }
 
+function newCriteriaCheck(bins, drop_array) {
+	for (i = 0; i < bins.length; i++)
+		if (bins[i] == 0 && !drop_array.includes(i)) {
+			return false
+		}
+	return true
+}
 
 
-
-function meetAllCriteria(input, pat_vals) {
+function meetAllCriteria(input, pat_vals, to_drop = []) {
 	let eligs = pat_vals.map(pat_row => cal_crit(input, pat_row));
+//	let elig_pass = eligs.map(bins =>
+//		bins.reduce((prev, curr) => prev + curr, 0) == bins.length ? 1 : 0
+//	);
 	let elig_pass = eligs.map(bins =>
-		bins.reduce((prev, curr) => prev + curr, 0) == bins.length ? 1 : 0
+		newCriteriaCheck(bins, to_drop) ? 1 : 0
 	);
 	return { elig_full: eligs, elig_passed: elig_pass };
 }
+
+
 function cal_crit(input, pat_row) {
-	// const cal_gen = (gen, elig) => (elig == gen ? 1 : 0);
 
 	let calculated_criterias = input.map(crit => {
 		let val = pat_row[crit.column_name];
 		if (crit.column_name[0] == "g") {
-			// let elig =
-			// 	crit.criteria_elig_binary == null ? 0 : crit.criteria_elig_binary;
-			return 1;
+			return (val == 'MALE' && crit.male_allowed == 1) || (val == 'FEMALE' && crit.female_allowed == 1) ? 1 : 0;
 		} else if (crit.column_name[0] == "m" || crit.column_name[0] == "a") {
-			// val =
-			// 	val == -1
-			// 		? (crit.criteria_max - crit.criteria_min) / 2 + crit.criteria_min
-			// 		: pat_row[crit.column_name];
-			return val >= crit.criteria_min && val <= crit.criteria_max ? 1 : 0;
+			return val == -1 || (val >= crit.criteria_min && val <= crit.criteria_max) ? 1 : 0;
 		} else {
-			// console.log(val, crit.criteria_elig_binary)
 			return val == crit.criteria_elig_binary ||
 				(crit.criteria_elig_binary == 0 && val == -1)
 				? 1
 				: 0;
-			// return 1;
 		}
 	});
 	return calculated_criterias;
