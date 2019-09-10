@@ -13,11 +13,11 @@ app.get("/", (req, res) => {
 	let input = req.body;
 
 	const client = new Client({
-		user: "postgres",
+		user: "****",
 		host: "localhost",
-		password: "poland",
-		database: "SynPUF",
-		port: "5463"
+		password: "****",
+		database: "****",
+		port: "****"
 	});
 
 	client.connect(err => {
